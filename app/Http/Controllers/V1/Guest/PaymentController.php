@@ -18,14 +18,18 @@ class PaymentController extends Controller
         try {
             $paymentService = new PaymentService($method, null, $uuid);
             $verify = $paymentService->notify($request->input());
-            if (!$verify)
+            if (!$verify) {
                 return $this->fail([422, 'verify error']);
+            }
             if (!$this->handle($verify['trade_no'], $verify['callback_no'])) {
                 return $this->fail([400, 'handle error']);
             }
-            return (isset($verify['custom_result']) ? $verify['custom_result'] : 'success');
+            return response()->json([
+                'status' => 'success',
+                'message' => $verify['custom_result'] ?? 'success',
+            ]);
         } catch (\Exception $e) {
-            \Log::error($e);
+            \Log::error($e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return $this->fail([500, 'fail']);
         }
     }
@@ -34,10 +38,12 @@ class PaymentController extends Controller
     {
         $order = Order::where('trade_no', $tradeNo)->first();
         if (!$order) {
-            return $this->fail([400202, 'order is not found']);
+            return false;
         }
-        if ($order->status !== Order::STATUS_PENDING)
+        if ($order->status !== Order::STATUS_PENDING) {
             return true;
+        }
+
         $orderService = new OrderService($order);
         if (!$orderService->paid($callbackNo)) {
             return false;
@@ -50,8 +56,7 @@ class PaymentController extends Controller
             "———————————————\n" .
             "支付接口：%s\n" .
             "支付渠道：%s\n" .
-            "本站订单：`%s`"
-            ,
+            "本站订单：`%s`",
             $order->total_amount / 100,
             $payment->payment,
             $payment->name,
@@ -60,5 +65,13 @@ class PaymentController extends Controller
 
         $telegramService->sendMessageWithAdmin($message);
         return true;
+    }
+
+    protected function fail($error)
+    {
+        return response()->json([
+            'status' => 'fail',
+            'error' => $error[1] ?? 'An error occurred',
+        ], $error[0] ?? 500);
     }
 }
